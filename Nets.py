@@ -112,8 +112,8 @@ class HAN(nn.Module):
         rev_embs = self._reorder_sent(sent_embs,sent_order)
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
         doc_embs = self.sent(packed_rev)
-        out = self.lin_out(F.selu(doc_embs))
-        out = self.lin_out1(F.selu(out))
+        out = F.alpha_dropout(self.lin_out(F.selu(doc_embs)))
+        out = F.alpha_dropout(self.lin_out1(F.selu(doc_embs)))
         out = self.lin_out2(F.selu(out))
 
         return out
