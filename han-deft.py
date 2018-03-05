@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
 import torch.nn.functional as F
 from Nets import NSCUPA, HAN
-from Data import TuplesListDataset, Vectorizer
 from fmtl import FMTL
 from utils import *
 import sys
@@ -141,10 +140,19 @@ def load(args):
 
     datadict = pkl.load(open(args.filename,"rb"))
     data_tl,(trainit,valit,testit) = FMTL_train_val_test(datadict["data"],datadict["splits"],args.split,validation=0.5,rows=datadict["rows"])
-    print(datadict["rows"])
-    #label_mapping = data_tl.get_field_dict("label",key_iter=trainit) #creates class mapping
-    label_mapping = {"INCONNU":1}
-    data_tl.set_mapping("label",label_mapping,unk=0) 
+    
+    if args.biclass:
+        label_mapping = {"INCONNU":1}
+        num_class = 2
+        data_tl.set_mapping("label",label_mapping,unk=0) 
+
+    else:
+        label_mapping = data_tl.get_field_dict("label",key_iter=trainit) #creates class mapping
+        data_tl.set_mapping("label",label_mapping) 
+        num_class = len(label_mapping)
+
+    print(label_mapping)
+
 
     if args.load:
         state = torch.load(args.load)
@@ -157,7 +165,6 @@ def load(args):
 
         wdict["_pad_"] = 0
         wdict["_unk_"] = 1
-        print(wdict)
         data_tl.set_mapping("text",wdict,unk=1)
 
 
@@ -172,10 +179,10 @@ def load(args):
 
     else:
         if args.emb:
-            net = HAN(ntoken=len(wdict),emb_size=len(tensor[1]),hid_size=args.hid_size,num_class=len(label_mapping)+1)
+            net = HAN(ntoken=len(wdict),emb_size=len(tensor[1]),hid_size=args.hid_size,num_class=num_class)
             net.set_emb_tensor(torch.FloatTensor(tensor))
         else:
-            net = HAN(ntoken=len(wdict), emb_size=args.emb_size,hid_size=args.hid_size, num_class=len(label_mapping)+1)
+            net = HAN(ntoken=len(wdict), emb_size=args.emb_size,hid_size=args.hid_size, num_class=num_class)
 
     if args.prebuild:
         data_tl = FMTL(list(x for x  in tqdm(data_tl,desc="prebuilding")),data_tl.rows)
@@ -254,6 +261,7 @@ if __name__ == '__main__':
     parser.add_argument("--snapshot", action='store_true')
     parser.add_argument("--prebuild",action="store_true")
     parser.add_argument('--cuda', action='store_true', help='use CUDA')
+    parser.add_argument('--biclass', action='store_true', help='do biclass')
 
     parser.add_argument("--output", type=str)
     parser.add_argument('filename', type=str)
