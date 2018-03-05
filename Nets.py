@@ -86,7 +86,9 @@ class HAN(nn.Module):
         self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0)
         self.word = AttentionalBiRNN(emb_size, hid_size)
         self.sent = AttentionalBiRNN(hid_size*2, hid_size)
-        self.lin_out = nn.Linear(hid_size*2,num_class)
+        self.lin_out = nn.Linear(hid_size*2,hid_size*2)
+        self.lin_out1 = nn.Linear(hid_size*2,hid_size*2)
+        self.lin_out2 = nn.Linear(hid_size*2,num_class)
 
     def set_emb_tensor(self,emb_tensor):
         self.emb_size = emb_tensor.size(-1)
@@ -110,7 +112,9 @@ class HAN(nn.Module):
         rev_embs = self._reorder_sent(sent_embs,sent_order)
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
         doc_embs = self.sent(packed_rev)
-        out = self.lin_out(doc_embs)
+        out = self.lin_out(F.selu(doc_embs))
+        out = self.lin_out1(F.selu(out))
+        out = self.lin_out2(F.selu(out))
 
         return out
 
