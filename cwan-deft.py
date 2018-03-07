@@ -67,8 +67,9 @@ def tuple_batch(l):
                 wi += 1
             chars_r.append(2) #space character
             sp_r.append(1)
-            wi+=1
             iw.append(wi)
+            wi+=1
+            
 
         sp_r[-2] = 1 #last character.
         chars.append(chars_r)
