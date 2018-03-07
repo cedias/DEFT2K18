@@ -121,7 +121,7 @@ class EmbedAttention2(nn.Module):
 
 
         exp = torch.exp(mat) * mask
-        sum_exp = exp.sum(0,True)+0.0001
+        sum_exp = exp.sum(1,True)+0.0001
      
         return exp/sum_exp.expand_as(exp)
 
@@ -145,6 +145,7 @@ class AttentionalBiRNN2(nn.Module):
         emb_h = F.tanh(self.lin(rnn_sents))
 
         attended = self.emb_att(emb_h,len_s) * rnn_sents
+        
         return attended.sum(1)
 
 
@@ -188,9 +189,11 @@ class CWAN(nn.Module):
         enc_tweets = F.pad(enc_tweets,(0,0,1,0)) #adds a 0 to the top
         try:
             w_tweets = enc_tweets[wi.view(-1)]
-        except:
+        except Exception as e:
+            
             print(enc_tweets.size())
             print(wi)
+            raise e
 
         w_tweets = w_tweets.view(txt.size(0),-1,enc_tweets.size(-1))
         

@@ -67,16 +67,17 @@ def tuple_batch(l):
                 wi += 1
             chars_r.append(2) #space character
             sp_r.append(1)
+            wi+=1
             iw.append(wi)
-            wi +=1 
 
         sp_r[-2] = 1 #last character.
-        chars.append(chars_r[:-1])
-        sp.append(sp_r[:-1])
+        chars.append(chars_r)
+        sp.append(sp_r)
         w_index.append(iw)
-        len_s.append(len(sp_r[:-1]))
-        if len(sp_r[:-1]) > len_c: #save max 
-            len_c = len(sp_r[:-1])
+        len_s.append(len(sp_r))
+
+        if len(sp_r) > len_c: #save max 
+            len_c = len(sp_r)
 
     tweets = torch.zeros(len(chars),len_c).long()
     word_ends = torch.zeros(len(chars),len_c).long()
