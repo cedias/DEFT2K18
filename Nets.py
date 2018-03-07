@@ -206,7 +206,7 @@ class CWAN(nn.Module):
         # packed_sents = torch.nn.utils.rnn.pack_padded_sequence(w_tweets, len_t.tolist(),batch_first=True)
         
 
-        out = self.lin_out(F.tanh(attended))
+        out = self.lin_out(F.dropout(F.tanh(attended)))
         
         
 

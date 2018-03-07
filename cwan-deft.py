@@ -110,7 +110,11 @@ def tuple_batch(l):
 
 @quiviz.log
 def train(epoch,net,optimizer,dataset,criterion,cuda,optimize=False,msg="test"):
-    net.train()
+    if optimize:
+        net.train()
+    else:
+        net.eval()
+        
     epoch_loss = 0
     ok_all = 0
     data_tensors = new_tensors(4,cuda,types={0:torch.LongTensor, 1:torch.LongTensor, 2:torch.LongTensor, 3:torch.LongTensor}) #data-tensors
@@ -231,7 +235,7 @@ def main(args):
         val = train(epoch,net,optimizer, dataloader_valid,criterion, args.cuda,msg="val")
         new_acc = list(val.values())[0]
 
-        if new_acc < last_acc:
+        if new_acc < last_acc and args.early:
             logging.info("---- EARLY STOPPING")
             sys.exit()
         last_acc = new_acc
@@ -268,6 +272,8 @@ if __name__ == '__main__':
     parser.add_argument("--prebuild",action="store_true")
     parser.add_argument('--cuda', action='store_true', help='use CUDA')
     parser.add_argument('--biclass', action='store_true', help='do biclass')
+    parser.add_argument('--early', action='store_true', help='do biclass')
+
 
     parser.add_argument("--output", type=str)
     parser.add_argument('filename', type=str)
