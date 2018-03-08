@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as I
 from torch.autograd import Variable
-
+import sys
 
 class EmbedAttention(nn.Module):
 
@@ -217,5 +217,91 @@ class CWAN(nn.Module):
         # out = F.alpha_dropout(self.lin_out(F.selu(doc_embs)))
         # out = F.alpha_dropout(self.lin_out1(F.selu(doc_embs)))
         # out = self.lin_out2(F.selu(out))
+
+        return out
+
+class QueryCosineAttention(nn.Module):
+    """
+    returns attention weights
+    """
+
+    def __init__(self):
+        super(QueryCosineAttention, self).__init__()
+
+    def forward(self,input,query,len_inp):
+        #input is b_size,num_seq,size
+        #query is b_size,size
+        #len_inp is array of b_size len
+        query = F.normalize(query)
+        input = F.normalize(input,dim=-1)
+        att = torch.bmm(input,query.unsqueeze(-1)).squeeze(-1) / input.size(-1)
+        
+        return self._masked(att,len_inp).squeeze(-1)
+        
+    
+    def _masked(self,mat,len_s):
+        len_s = len_s.tolist()
+        if type(len_s) == list:
+            len_s = torch.FloatTensor(len_s).type_as(mat.data).long()
+        
+        idxes = torch.arange(0,mat.size(1),out=mat.data.new(mat.size(1))).long().unsqueeze(0)
+        mask = Variable((idxes<len_s.unsqueeze(1)).float(),requires_grad=False)
+        return mat * mask
+
+
+
+class ACWAN(nn.Module):
+
+    def __init__(self, ntoken, num_class, emb_size=200, hid_size=100):
+        super(ACWAN, self).__init__()
+
+        self.emb_size = emb_size
+        self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0,norm_type=2,max_norm=1)
+        self.word = QueryCosineAttention()
+        self.lin_out = nn.Linear(hid_size,num_class)
+        self.rnn = nn.GRU(input_size=emb_size,hidden_size=hid_size,num_layers=1,bias=True,batch_first=True,dropout=0,bidirectional=False)
+        self.lgr = nn.Linear(hid_size*2,1)
+        self.trans_state = nn.Linear(hid_size,hid_size)
+        self.trans_inp = nn.Linear(hid_size,hid_size)
+        
+
+
+    def set_emb_tensor(self,emb_tensor):
+        self.emb_size = emb_tensor.size(-1)
+        self.embed.weight.data = emb_tensor
+
+    
+    def _reorder_sent(self,sents,sent_order):
+        
+        sents = F.pad(sents,(0,0,1,0)) #adds a 0 to the top
+        revs = sents[sent_order.view(-1)]
+        revs = revs.view(sent_order.size(0),sent_order.size(1),sents.size(1))
+
+        return revs
+ 
+    def reset_gate(self,input,state):
+        return F.sigmoid(self.lgr(torch.cat([input,state],dim=-1)))
+
+    def forward(self, txt,lens):
+
+        emb_w = F.dropout(self.embed(txt),training=self.training)
+        rnn_out,_ = self.rnn(emb_w)
+        query = Variable(torch.ones(rnn_out.size(0),rnn_out.size(-1)))
+        a_w = self.word(rnn_out,query,lens).unsqueeze(-1)
+
+        #initial state is 0
+        state = Variable(torch.zeros(rnn_out.size(0),rnn_out.size(-1)))
+
+        for t in range(rnn_out.size(1)):
+            inp = rnn_out[:,t,:]
+            z = F.relu(a_w[:,t])
+            ns = F.tanh(self.trans_inp(inp) + self.trans_state(self.reset_gate(inp,state) * state))
+            state = (1-z) * state + z * ns  
+        
+
+
+       
+        out = self.lin_out(state)
+
 
         return out
