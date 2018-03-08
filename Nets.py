@@ -286,11 +286,11 @@ class ACWAN(nn.Module):
 
         emb_w = F.dropout(self.embed(txt),training=self.training)
         rnn_out,_ = self.rnn(emb_w)
-        query = Variable(torch.ones(rnn_out.size(0),rnn_out.size(-1)))
+        query = Variable(emb_w.data.new(rnn_out.size(0),rnn_out.size(-1)).fill_(1))
         a_w = self.word(rnn_out,query,lens).unsqueeze(-1)
 
         #initial state is 0
-        state = Variable(torch.zeros(rnn_out.size(0),rnn_out.size(-1)))
+        state = Variable(a_w.data.new(rnn_out.size(0),rnn_out.size(-1)).fill_(0))
 
         for t in range(rnn_out.size(1)):
             inp = rnn_out[:,t,:]
