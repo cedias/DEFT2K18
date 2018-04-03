@@ -52,6 +52,35 @@ class AttentionalBiRNN(nn.Module):
 
         attended = self.emb_att(emb_h,len_s) * enc_sents
         return attended.sum(0,True).squeeze(0)
+    
+
+
+class DAttentionalBiRNN(nn.Module):
+
+    def __init__(self, inp_size, hid_size, dropout=0, RNN_cell=nn.GRU):
+        super(DAttentionalBiRNN, self).__init__()
+        
+        self.natt = hid_size*2
+
+        self.rnn = RNN_cell(input_size=inp_size,hidden_size=hid_size,num_layers=1,bias=True,batch_first=True,dropout=dropout,bidirectional=True)
+        self.lin = nn.Linear(hid_size*2,self.natt)
+        self.lin2 = nn.Linear(hid_size*2,self.natt)
+        self.att_w = nn.Linear(self.natt,1,bias=False)
+        self.emb_att = EmbedAttention(self.natt)
+        self.emb_att2 = EmbedAttention(self.natt)
+
+    
+    def forward(self, packed_batch):
+        
+        rnn_sents,_ = self.rnn(packed_batch)
+        enc_sents,len_s = torch.nn.utils.rnn.pad_packed_sequence(rnn_sents)
+
+        emb_h = F.tanh(self.lin(enc_sents))
+        emb_h2 = F.tanh(self.lin(enc_sents))
+
+        attended = self.emb_att(emb_h,len_s) * enc_sents
+        attended2 = self.emb_att2(emb_h2,len_s) * enc_sents
+        return attended.sum(0,True).squeeze(0), attended2.sum(0,True).squeeze(0)
 
 
 
@@ -63,11 +92,10 @@ class HAN(nn.Module):
 
         self.emb_size = emb_size
         self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0)
-        self.word = AttentionalBiRNN(emb_size, hid_size)
-        self.sent = AttentionalBiRNN(hid_size*2, hid_size)
-        self.lin_out = nn.Linear(hid_size*2,hid_size*2)
-        self.lin_out1 = nn.Linear(hid_size*2,hid_size*2)
-        self.lin_out2 = nn.Linear(hid_size*2,num_class)
+        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.GRU,dropout=0.0)
+        self.sent = DAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.GRU,dropout=0.0)
+        self.lin_out_t = nn.Linear(hid_size*2,2)
+        self.lin_out_s = nn.Linear(hid_size*2,num_class-1)
 
     def set_emb_tensor(self,emb_tensor):
         self.emb_size = emb_tensor.size(-1)
@@ -87,15 +115,20 @@ class HAN(nn.Module):
 
         emb_w = F.dropout(self.embed(batch_reviews),training=self.training)
         packed_sents = torch.nn.utils.rnn.pack_padded_sequence(emb_w, ls,batch_first=True)
-        sent_embs = self.word(packed_sents)
+        sent_embs = F.dropout(F.relu(self.word(packed_sents)),training=self.training)
         rev_embs = self._reorder_sent(sent_embs,sent_order)
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
-        doc_embs = self.sent(packed_rev)
-        out = F.alpha_dropout(self.lin_out(F.selu(doc_embs)))
-        out = F.alpha_dropout(self.lin_out1(F.selu(doc_embs)))
-        out = self.lin_out2(F.selu(out))
+        doc_embs_t,doc_embs_s = self.sent(packed_rev)
 
-        return out
+        out_t = self.lin_out_t(F.relu(doc_embs_t))
+        out_s = self.lin_out_s(F.relu(doc_embs_s))
+
+
+        
+
+        out_s = torch.cat([out_t[:,0].unsqueeze(-1).detach(),out_s],dim=-1)
+
+        return out_t, out_s
 
 
 class EmbedAttention2(nn.Module):

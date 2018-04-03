@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
 import torch.nn.functional as F
-from Nets import NSCUPA, HAN
+from Nets import  HAN
 from fmtl import FMTL
 from utils import *
 import sys
@@ -76,6 +76,10 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
     epoch_loss = 0
     mean_mse = 0
     mean_rmse = 0
+    
+    ok_allbc = 0
+    pred = 0
+
     ok_all = 0
     data_tensors = new_tensors(3,cuda,types={0:torch.LongTensor,1:torch.LongTensor,2:torch.LongTensor}) #data-tensors
 
@@ -84,56 +88,73 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
 
             data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
             optimizer.zero_grad()
-            out = net(data[0],data[2],ls,lr)
+            out_t,out_s = net(data[0],data[2],ls,lr)
 
-            ok,per,val_i = accuracy(out,data[1])
+            
+            databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
+
+            ok,perbc,val_i = accuracy(out_t,databc)
+           
+
+            ok,per,val_i = accuracy(out_s,data[1])
             ok_all += per.data[0]
+
+            ok_allbc += perbc.data[0]
 
             mseloss = F.mse_loss(val_i,data[1].float())
             mean_rmse += math.sqrt(mseloss.data[0])
             mean_mse += mseloss.data[0]
-            loss =  criterion(out, data[1]) 
+            loss =  criterion(out_t, databc)  + criterion(out_s, data[1]) 
             epoch_loss += loss.data[0]
             loss.backward()
             optimizer.step()
-
+            pred+=1
             pbar.update(1)
-            pbar.set_postfix({"acc":ok_all/(iteration+1),"CE":epoch_loss/(iteration+1),"mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
+            pbar.set_postfix({"acc":ok_all/pred,"accbc":ok_allbc/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
 
     print("===> Epoch {} Complete: Avg. Loss: {:.4f}, {}% accuracy".format(epoch, epoch_loss /len(dataset),ok_all/len(dataset)))
-    return {"train_acc": ok_all/len(dataset)}
+    return {"train_acc": ok_all/len(dataset),"accbc":ok_allbc/pred}
 
 @quiviz.log
 def test(epoch,net,dataset,cuda,msg="test"):
     net.eval()
     epoch_loss = 0
-    ok_all = 0
-    pred = 0
-    skipped = 0
     mean_mse = 0
     mean_rmse = 0
-    data_tensors = new_tensors(3,cuda,types={0:torch.LongTensor,1:torch.LongTensor,2:torch.LongTensor}) #data-tensors
     
-    with tqdm(total=len(dataset),desc=msg) as pbar:
-        for iteration, (batch_t,r_t,sent_order,ls,lr,review) in enumerate(dataset):
-            data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
-            out  = net(data[0],data[2],ls,lr)
-            ok,per,val_i = accuracy(out,data[1])
+    ok_allbc = 0
+    pred = 0
 
+    ok_all = 0
+    data_tensors = new_tensors(3,cuda,types={0:torch.LongTensor,1:torch.LongTensor,2:torch.LongTensor}) #data-tensors
+
+    with tqdm(total=len(dataset),desc="Training") as pbar:
+        for iteration, (batch_t,r_t,sent_order,ls,lr,review) in enumerate(dataset):
+
+            data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
+            out_t,out_s = net(data[0],data[2],ls,lr)
+
+            
+            databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
+
+            ok,perbc,val_i = accuracy(out_t,databc)
+           
+
+            ok,per,val_i = accuracy(out_s,data[1])
+            ok_all += per.data[0]
+
+            ok_allbc += perbc.data[0]
 
             mseloss = F.mse_loss(val_i,data[1].float())
             mean_rmse += math.sqrt(mseloss.data[0])
             mean_mse += mseloss.data[0]
 
-            ok_all += per.data[0]
             pred+=1
-
             pbar.update(1)
-            pbar.set_postfix({"acc":ok_all/pred, "skipped":skipped,"mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
+            pbar.set_postfix({"acc":ok_all/pred,"accbc":ok_allbc/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
 
-
-    print("===> {} Complete:  {}% accuracy".format(msg,ok_all/pred))
-    return {f"{msg}_acc": ok_all/pred}
+    print("===> Epoch {} Complete: Avg. Loss: {:.4f}, {}% accuracy".format(epoch, epoch_loss /len(dataset),ok_all/len(dataset)))
+    return {f"{msg}_acc": ok_all/pred, f"{msg}_accbc":ok_allbc/pred}
 
 
 def load(args):
@@ -225,9 +246,9 @@ def main(args):
         val = test(epoch,net,dataloader_valid,args.cuda,msg="val")
         new_acc = list(val.values())[0]
 
-        if new_acc < last_acc:
-            logging.info("---- EARLY STOPPING")
-            sys.exit()
+        # if new_acc < last_acc:
+        #     logging.info("---- EARLY STOPPING")
+        #     sys.exit()
         last_acc = new_acc
 
         test(epoch,net,dataloader_test,args.cuda)
@@ -241,15 +262,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Hierarchical Attention Networks for Document Classification')
     
-    parser.add_argument("--emb-size",type=int,default=200)
-    parser.add_argument("--hid-size",type=int,default=100)
+    parser.add_argument("--emb-size",type=int,default=50)
+    parser.add_argument("--hid-size",type=int,default=250)
 
     parser.add_argument("--max-feat", type=int,default=10000)
-    parser.add_argument("--epochs", type=int,default=10)
+    parser.add_argument("--epochs", type=int,default=100)
     parser.add_argument("--clip-grad", type=float,default=1)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--momentum",type=float,default=0.9)
-    parser.add_argument("--b-size", type=int, default=32)
+    parser.add_argument("--b-size", type=int, default=64)
 
     parser.add_argument("--emb", type=str)
     parser.add_argument("--max-words", type=int,default=-1)

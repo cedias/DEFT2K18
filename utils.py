@@ -34,6 +34,23 @@ def accuracy(out,truth):
 
     return all_eq, all_eq/truth.size(0)*100, max_i.float()
 
+def accuracy_deft(out,truth):
+    def sm(mat):
+        exp = torch.exp(mat)
+        sum_exp = exp.sum(1,True)+0.0001
+        return exp/sum_exp.expand_as(exp)
+
+    _,max_i = torch.max(sm(out),1)
+
+    eq = torch.eq(max_i,truth).float()
+    all_eq = torch.sum(eq)
+
+
+    bc = torch.sum(((truth == 0)*(max_i == 0)).float())
+    
+
+    return all_eq, all_eq/truth.size(0)*100, max_i.float(), bc, bc/truth.size(0)*100
+
 def checkpoint(epoch,net,output):
     model_out_path = output+"_epoch_{}.pth".format(epoch)
     torch.save(net, model_out_path)
