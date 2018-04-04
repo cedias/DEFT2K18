@@ -76,7 +76,7 @@ class DAttentionalBiRNN(nn.Module):
         enc_sents,len_s = torch.nn.utils.rnn.pad_packed_sequence(rnn_sents)
 
         emb_h = F.tanh(self.lin(enc_sents))
-        emb_h2 = F.tanh(self.lin(enc_sents))
+        emb_h2 = F.tanh(self.lin2(enc_sents))
 
         attended = self.emb_att(emb_h,len_s) * enc_sents
         attended2 = self.emb_att2(emb_h2,len_s) * enc_sents
@@ -87,15 +87,19 @@ class DAttentionalBiRNN(nn.Module):
 
 class HAN(nn.Module):
 
-    def __init__(self, ntoken, num_class, emb_size=200, hid_size=50):
+    def __init__(self, ntoken, num_class, emb_size=200, hid_size=50,tokens=[]):
         super(HAN, self).__init__()
 
         self.emb_size = emb_size
+        self.tokens = tokens
         self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0)
-        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.GRU,dropout=0.0)
-        self.sent = DAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.GRU,dropout=0.0)
+        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.LSTM,dropout=0.0)
+        self.sent = DAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.LSTM,dropout=0.0)
         self.lin_out_t = nn.Linear(hid_size*2,2)
-        self.lin_out_s = nn.Linear(hid_size*2,num_class-1)
+
+        self.lin_out_s0 = nn.Linear(hid_size*2,hid_size)
+        self.lin_out_s1 = nn.Linear(hid_size,hid_size)
+        self.lin_out_s2 = nn.Linear(hid_size,num_class-1)
 
     def set_emb_tensor(self,emb_tensor):
         self.emb_size = emb_tensor.size(-1)
@@ -113,22 +117,25 @@ class HAN(nn.Module):
 
     def forward(self, batch_reviews,sent_order,ls,lr):
 
+        
+
         emb_w = F.dropout(self.embed(batch_reviews),training=self.training)
         packed_sents = torch.nn.utils.rnn.pack_padded_sequence(emb_w, ls,batch_first=True)
-        sent_embs = F.dropout(F.relu(self.word(packed_sents)),training=self.training)
+        sent_embs = self.word(packed_sents)
         rev_embs = self._reorder_sent(sent_embs,sent_order)
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
         doc_embs_t,doc_embs_s = self.sent(packed_rev)
 
-        out_t = self.lin_out_t(F.relu(doc_embs_t))
-        out_s = self.lin_out_s(F.relu(doc_embs_s))
+        out_t = self.lin_out_t(doc_embs_t)
+
+        out_s0 = self.lin_out_s0(doc_embs_s)
+        # out_s = self.lin_out_s1(F.relu(out_s))
+        # out_s0 = self.lin_out_s2(F.relu(out_s))
 
 
-        
+        out_s = torch.cat([out_t[:,0].unsqueeze(-1),out_s0],dim=-1)
 
-        out_s = torch.cat([out_t[:,0].unsqueeze(-1).detach(),out_s],dim=-1)
-
-        return out_t, out_s
+        return  torch.cat([out_t[:,0].unsqueeze(-1),out_t[:,1].unsqueeze(-1)],dim=-1), out_s , torch.mean(torch.abs(out_t[:,1].unsqueeze(-1) - torch.mean(out_s0,dim=-1)))
 
 
 class EmbedAttention2(nn.Module):

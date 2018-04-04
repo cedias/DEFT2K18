@@ -88,14 +88,13 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
 
             data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
             optimizer.zero_grad()
-            out_t,out_s = net(data[0],data[2],ls,lr)
+            out_t,out_s,reg = net(data[0],data[2],ls,lr)
 
             
             databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
 
             ok,perbc,val_i = accuracy(out_t,databc)
            
-
             ok,per,val_i = accuracy(out_s,data[1])
             ok_all += per.data[0]
 
@@ -104,7 +103,14 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
             mseloss = F.mse_loss(val_i,data[1].float())
             mean_rmse += math.sqrt(mseloss.data[0])
             mean_mse += mseloss.data[0]
-            loss =  criterion(out_t, databc)  + criterion(out_s, data[1]) 
+
+            if iteration %2 == 1:
+                alpha = 1
+            else:
+                alpha = 0
+
+            loss =  alpha *  criterion(out_t, databc)  +  (1- alpha) * criterion(out_s, data[1]) +reg
+
             epoch_loss += loss.data[0]
             loss.backward()
             optimizer.step()
@@ -132,7 +138,7 @@ def test(epoch,net,dataset,cuda,msg="test"):
         for iteration, (batch_t,r_t,sent_order,ls,lr,review) in enumerate(dataset):
 
             data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
-            out_t,out_s = net(data[0],data[2],ls,lr)
+            out_t,out_s,_ = net(data[0],data[2],ls,lr)
 
             
             databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
@@ -187,6 +193,7 @@ def load(args):
         wdict["_pad_"] = 0
         wdict["_unk_"] = 1
         data_tl.set_mapping("text",wdict,unk=1)
+        
 
 
     print("Train set class stats:\n" + 10*"-")
@@ -200,10 +207,10 @@ def load(args):
 
     else:
         if args.emb:
-            net = HAN(ntoken=len(wdict),emb_size=len(tensor[1]),hid_size=args.hid_size,num_class=num_class)
+            net = HAN(ntoken=len(wdict),emb_size=len(tensor[1]),hid_size=args.hid_size,num_class=num_class,tokens=(wdict["#"],wdict['@']))
             net.set_emb_tensor(torch.FloatTensor(tensor))
         else:
-            net = HAN(ntoken=len(wdict), emb_size=args.emb_size,hid_size=args.hid_size, num_class=num_class)
+            net = HAN(ntoken=len(wdict), emb_size=args.emb_size,hid_size=args.hid_size, num_class=num_class,tokens=(wdict["#"],wdict['@']))
 
     if args.prebuild:
         data_tl = FMTL(list(x for x  in tqdm(data_tl,desc="prebuilding")),data_tl.rows)
@@ -262,15 +269,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Hierarchical Attention Networks for Document Classification')
     
-    parser.add_argument("--emb-size",type=int,default=50)
-    parser.add_argument("--hid-size",type=int,default=250)
+    parser.add_argument("--emb-size",type=int,default=200)
+    parser.add_argument("--hid-size",type=int,default=150)
 
     parser.add_argument("--max-feat", type=int,default=10000)
     parser.add_argument("--epochs", type=int,default=100)
     parser.add_argument("--clip-grad", type=float,default=1)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--momentum",type=float,default=0.9)
-    parser.add_argument("--b-size", type=int, default=64)
+    parser.add_argument("--b-size", type=int, default=16)
 
     parser.add_argument("--emb", type=str)
     parser.add_argument("--max-words", type=int,default=-1)
