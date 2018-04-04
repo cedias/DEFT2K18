@@ -109,7 +109,7 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
             else:
                 alpha = 0
 
-            loss =  alpha *  criterion(out_t, databc)  +  (1- alpha) * criterion(out_s, data[1]) +reg
+            loss =  alpha *  criterion(out_t, databc)  +  (1- 0) * criterion(out_s, data[1]) +reg
 
             epoch_loss += loss.data[0]
             loss.backward()

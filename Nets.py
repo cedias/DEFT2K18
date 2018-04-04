@@ -129,13 +129,12 @@ class HAN(nn.Module):
         out_t = self.lin_out_t(doc_embs_t)
 
         out_s0 = self.lin_out_s0(doc_embs_s)
-        # out_s = self.lin_out_s1(F.relu(out_s))
-        # out_s0 = self.lin_out_s2(F.relu(out_s))
+        
 
 
         out_s = torch.cat([out_t[:,0].unsqueeze(-1),out_s0],dim=-1)
 
-        return  torch.cat([out_t[:,0].unsqueeze(-1),out_t[:,1].unsqueeze(-1)],dim=-1), out_s , torch.mean(torch.abs(out_t[:,1].unsqueeze(-1) - torch.mean(out_s0,dim=-1)))
+        return  out_t, out_s , torch.mean(torch.abs(out_t[:,1].unsqueeze(-1) - torch.mean(out_s0,dim=-1)))
 
 
 class EmbedAttention2(nn.Module):
