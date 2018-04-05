@@ -53,6 +53,7 @@ def tuple_batch(l):
     max_sents = lr[0]
 
     #reordered
+
     r_t = r_t[[r_n]]
     review = [review[x] for x in r_n]
 
@@ -88,38 +89,31 @@ def train(epoch,net,optimizer,dataset,criterion,cuda):
 
             data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
             optimizer.zero_grad()
-            out_t,out_s,reg = net(data[0],data[2],ls,lr)
 
+
+            out_t = net(data[0],data[2],ls,lr)
+
+
+            ok,per,val_i = accuracy(out_t,data[1])
             
-            databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
-
-            ok,perbc,val_i = accuracy(out_t,databc)
-           
-            ok,per,val_i = accuracy(out_s,data[1])
             ok_all += per.data[0]
 
-            ok_allbc += perbc.data[0]
 
             mseloss = F.mse_loss(val_i,data[1].float())
             mean_rmse += math.sqrt(mseloss.data[0])
             mean_mse += mseloss.data[0]
 
-            if iteration %2 == 1:
-                alpha = 1
-            else:
-                alpha = 0
-
-            loss =  alpha *  criterion(out_t, databc)  +  (1- 0) * criterion(out_s, data[1]) +reg
+            loss =  criterion(out_t, data[1])
 
             epoch_loss += loss.data[0]
             loss.backward()
             optimizer.step()
             pred+=1
             pbar.update(1)
-            pbar.set_postfix({"acc":ok_all/pred,"accbc":ok_allbc/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
+            pbar.set_postfix({"acc":ok_all/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
 
     print("===> Epoch {} Complete: Avg. Loss: {:.4f}, {}% accuracy".format(epoch, epoch_loss /len(dataset),ok_all/len(dataset)))
-    return {"train_acc": ok_all/len(dataset),"accbc":ok_allbc/pred}
+    return {"train_acc": ok_all/len(dataset)}
 
 @quiviz.log
 def test(epoch,net,dataset,cuda,msg="test"):
@@ -138,18 +132,11 @@ def test(epoch,net,dataset,cuda,msg="test"):
         for iteration, (batch_t,r_t,sent_order,ls,lr,review) in enumerate(dataset):
 
             data = tuple2var(data_tensors,(batch_t,r_t,sent_order))
-            out_t,out_s,_ = net(data[0],data[2],ls,lr)
+            out_t= net(data[0],data[2],ls,lr)
 
             
-            databc = torch.min(Variable(data[1].data.new().resize_(data[1].size()).fill_(1)),data[1])
-
-            ok,perbc,val_i = accuracy(out_t,databc)
-           
-
-            ok,per,val_i = accuracy(out_s,data[1])
+            ok,per,val_i = accuracy(out_t,data[1])
             ok_all += per.data[0]
-
-            ok_allbc += perbc.data[0]
 
             mseloss = F.mse_loss(val_i,data[1].float())
             mean_rmse += math.sqrt(mseloss.data[0])
@@ -157,10 +144,10 @@ def test(epoch,net,dataset,cuda,msg="test"):
 
             pred+=1
             pbar.update(1)
-            pbar.set_postfix({"acc":ok_all/pred,"accbc":ok_allbc/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
+            pbar.set_postfix({"acc":ok_all/pred, "mseloss":mean_mse/(iteration+1),"rmseloss":mean_rmse/(iteration+1)})
 
     print("===> Epoch {} Complete: Avg. Loss: {:.4f}, {}% accuracy".format(epoch, epoch_loss /len(dataset),ok_all/len(dataset)))
-    return {f"{msg}_acc": ok_all/pred, f"{msg}_accbc":ok_allbc/pred}
+    return {f"{msg}_acc": ok_all/pred}
 
 
 def load(args):
@@ -224,7 +211,7 @@ def main(args):
     data_tl, (train_set, val_set, test_set), net, wdict = load(args)
 
 
-    dataloader = DataLoader(data_tl.indexed_iter(train_set), batch_size=args.b_size, shuffle=True, num_workers=3, collate_fn=tuple_batch,pin_memory=True)
+    dataloader = DataLoader(data_tl.indexed_iter(train_set), batch_size=args.b_size, shuffle=True, num_workers=0, collate_fn=tuple_batch,pin_memory=True)
     dataloader_valid = DataLoader(data_tl.indexed_iter(val_set), batch_size=args.b_size, shuffle=False,  num_workers=3, collate_fn=tuple_batch)
     dataloader_test = DataLoader(data_tl.indexed_iter(test_set), batch_size=args.b_size, shuffle=False, num_workers=3, collate_fn=tuple_batch,drop_last=True)
 
@@ -269,7 +256,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Hierarchical Attention Networks for Document Classification')
     
-    parser.add_argument("--emb-size",type=int,default=200)
+    parser.add_argument("--emb-size",type=int,default=300)
     parser.add_argument("--hid-size",type=int,default=150)
 
     parser.add_argument("--max-feat", type=int,default=10000)

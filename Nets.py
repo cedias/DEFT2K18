@@ -55,33 +55,33 @@ class AttentionalBiRNN(nn.Module):
     
 
 
-class DAttentionalBiRNN(nn.Module):
+class TokAttentionalBiRNN(nn.Module):
 
     def __init__(self, inp_size, hid_size, dropout=0, RNN_cell=nn.GRU):
-        super(DAttentionalBiRNN, self).__init__()
+        super(TokAttentionalBiRNN, self).__init__()
         
         self.natt = hid_size*2
 
         self.rnn = RNN_cell(input_size=inp_size,hidden_size=hid_size,num_layers=1,bias=True,batch_first=True,dropout=dropout,bidirectional=True)
         self.lin = nn.Linear(hid_size*2,self.natt)
-        self.lin2 = nn.Linear(hid_size*2,self.natt)
         self.att_w = nn.Linear(self.natt,1,bias=False)
         self.emb_att = EmbedAttention(self.natt)
-        self.emb_att2 = EmbedAttention(self.natt)
 
     
-    def forward(self, packed_batch):
+    def forward(self, packed_batch,tok):
         
         rnn_sents,_ = self.rnn(packed_batch)
         enc_sents,len_s = torch.nn.utils.rnn.pad_packed_sequence(rnn_sents)
 
         emb_h = F.tanh(self.lin(enc_sents))
-        emb_h2 = F.tanh(self.lin2(enc_sents))
 
         attended = self.emb_att(emb_h,len_s) * enc_sents
-        attended2 = self.emb_att2(emb_h2,len_s) * enc_sents
-        return attended.sum(0,True).squeeze(0), attended2.sum(0,True).squeeze(0)
 
+        tok = tok.transpose(0,1).unsqueeze(-1)
+        tokw = enc_sents  * tok.detach()
+
+        return attended.sum(0,True).squeeze(0) , tokw.mean(0,True).squeeze(0)
+    
 
 
 
@@ -93,13 +93,10 @@ class HAN(nn.Module):
         self.emb_size = emb_size
         self.tokens = tokens
         self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0)
-        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.LSTM,dropout=0.0)
-        self.sent = DAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.LSTM,dropout=0.0)
-        self.lin_out_t = nn.Linear(hid_size*2,2)
-
-        self.lin_out_s0 = nn.Linear(hid_size*2,hid_size)
-        self.lin_out_s1 = nn.Linear(hid_size,hid_size)
-        self.lin_out_s2 = nn.Linear(hid_size,num_class-1)
+        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.GRU,dropout=0.2)
+        self.sent = TokAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.GRU,dropout=0.2)
+        self.lin_out_t = nn.Linear(hid_size*2,num_class)
+        self.tokat = nn.Linear(hid_size*2,1)
 
     def set_emb_tensor(self,emb_tensor):
         self.emb_size = emb_tensor.size(-1)
@@ -113,28 +110,78 @@ class HAN(nn.Module):
         revs = revs.view(sent_order.size(0),sent_order.size(1),sents.size(1))
 
         return revs
+
+    def _reorder_tok(self,tok,sent_order):
+        sents = tok
+        revs = sents[sent_order.view(-1)]
+
+        revs = revs.view(sent_order.size(0),sent_order.size(1))
+        
+        return revs
  
 
     def forward(self, batch_reviews,sent_order,ls,lr):
+        
 
+        tok_mask = (batch_reviews[:,0] < 0)
+        tok_mask.detach()
+
+        for tok in self.tokens:
+           tok_mask = tok_mask | (batch_reviews[:,0] == tok)
+
+        tok_mask = tok_mask.float()
+        
+        
+        tok_mask = torch.cat([Variable(tok_mask.data.new().resize_(1).fill_(0)),tok_mask],dim=0)
         
 
         emb_w = F.dropout(self.embed(batch_reviews),training=self.training)
         packed_sents = torch.nn.utils.rnn.pack_padded_sequence(emb_w, ls,batch_first=True)
         sent_embs = self.word(packed_sents)
         rev_embs = self._reorder_sent(sent_embs,sent_order)
+        tok_w = self._reorder_tok(tok_mask,sent_order)
+
+
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
-        doc_embs_t,doc_embs_s = self.sent(packed_rev)
+        doc_embs,toked_avg = self.sent(packed_rev,tok_w)
 
-        out_t = self.lin_out_t(doc_embs_t)
+        #print(torch.sum(tok_w,dim=-1,True))
+        a = F.sigmoid(self.tokat(toked_avg)) * F.sigmoid(torch.sum(tok_w,-1,True)).detach()
+        out_t = self.lin_out_t(a * toked_avg + (1-a) * doc_embs)
 
-        out_s0 = self.lin_out_s0(doc_embs_s)
-        
+        return  out_t
 
 
-        out_s = torch.cat([out_t[:,0].unsqueeze(-1),out_s0],dim=-1)
 
-        return  out_t, out_s , torch.mean(torch.abs(out_t[:,1].unsqueeze(-1) - torch.mean(out_s0,dim=-1)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class EmbedAttention2(nn.Module):
