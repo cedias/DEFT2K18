@@ -156,13 +156,14 @@ def load(args):
     data_tl,(trainit,valit,testit) = FMTL_train_val_test(datadict["data"],datadict["splits"],args.split,validation=0.5,rows=datadict["rows"])
     
     if args.biclass:
-        label_mapping = {"INCONNU":1}
+        label_mapping = {"TRANSPORT":0,"INCONNU":1}
         num_class = 2
         data_tl.set_mapping("label",label_mapping,unk=0) 
 
     else:
-        label_mapping = data_tl.get_field_dict("label",key_iter=trainit) #creates class mapping
-        data_tl.set_mapping("label",label_mapping) 
+  
+        label_mapping = {"INCONNU":0,"NEUTRE":1,"NEGATIF":2,"MIXPOSNEG":3,"POSITIF":4}
+        data_tl.set_mapping("label",label_mapping,unk=0) 
         num_class = len(label_mapping)
 
     print(label_mapping)
@@ -179,7 +180,7 @@ def load(args):
 
         wdict["_pad_"] = 0
         wdict["_unk_"] = 1
-        data_tl.set_mapping("text",wdict,unk=1)
+    data_tl.set_mapping("text",wdict,unk=1)
         
 
 
@@ -188,7 +189,7 @@ def load(args):
 
     if args.load:
         #print(state.keys())
-        net = HAN(ntoken=len(state["word_dic"]),emb_size=state["embed.weight"].size(1),hid_size=state["sent.rnn.weight_hh_l0"].size(1),num_class=state["lin_out.weight"].size(0))
+        net = HAN(ntoken=len(state["word_dic"]),emb_size=state["embed.weight"].size(1),hid_size=state["sent.rnn.weight_hh_l0"].size(1),num_class=num_class,tokens=(wdict["#"],wdict['@']))
         del state["word_dic"]
         net.load_state_dict(state)
 
@@ -211,8 +212,8 @@ def main(args):
     data_tl, (train_set, val_set, test_set), net, wdict = load(args)
 
 
-    dataloader = DataLoader(data_tl.indexed_iter(train_set), batch_size=args.b_size, shuffle=True, num_workers=0, collate_fn=tuple_batch,pin_memory=True)
-    dataloader_valid = DataLoader(data_tl.indexed_iter(val_set), batch_size=args.b_size, shuffle=False,  num_workers=3, collate_fn=tuple_batch)
+    dataloader = DataLoader(data_tl.indexed_iter(train_set+val_set), batch_size=args.b_size, shuffle=True, num_workers=3, collate_fn=tuple_batch,pin_memory=True)
+    #dataloader_valid = DataLoader(data_tl.indexed_iter(val_set), batch_size=args.b_size, shuffle=False,  num_workers=3, collate_fn=tuple_batch)
     dataloader_test = DataLoader(data_tl.indexed_iter(test_set), batch_size=args.b_size, shuffle=False, num_workers=3, collate_fn=tuple_batch,drop_last=True)
 
     criterion = torch.nn.CrossEntropyLoss()      
@@ -237,13 +238,13 @@ def main(args):
             print("snapshot of model saved as {}".format(args.save+"_snapshot"))
             save(net,wdict,args.save+"_snapshot")
 
-        val = test(epoch,net,dataloader_valid,args.cuda,msg="val")
-        new_acc = list(val.values())[0]
+        #val = test(epoch,net,dataloader_valid,args.cuda,msg="val")
+        #        new_acc = list(val.values())[0]
 
         # if new_acc < last_acc:
         #     logging.info("---- EARLY STOPPING")
         #     sys.exit()
-        last_acc = new_acc
+       # last_acc = new_acc
 
         test(epoch,net,dataloader_test,args.cuda)
 

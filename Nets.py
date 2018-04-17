@@ -54,6 +54,18 @@ class AttentionalBiRNN(nn.Module):
         return attended.sum(0,True).squeeze(0)
     
 
+class LockedDropout(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, dropout=0.5):
+        if not self.training or not dropout:
+            return x
+        m = x.data.new(1, x.size(1), x.size(2)).bernoulli_(1 - dropout)
+        mask = Variable(m, requires_grad=False) / (1 - dropout)
+        mask = mask.expand_as(x)
+        return mask * x
+
 
 class TokAttentionalBiRNN(nn.Module):
 
@@ -80,7 +92,7 @@ class TokAttentionalBiRNN(nn.Module):
         tok = tok.transpose(0,1).unsqueeze(-1)
         tokw = enc_sents  * tok.detach()
 
-        return attended.sum(0,True).squeeze(0) , tokw.mean(0,True).squeeze(0)
+        return attended.sum(0,True).squeeze(0) , tokw.sum(0,True).squeeze(0)
     
 
 
@@ -93,10 +105,12 @@ class HAN(nn.Module):
         self.emb_size = emb_size
         self.tokens = tokens
         self.embed = nn.Embedding(ntoken, emb_size,padding_idx=0)
-        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.GRU,dropout=0.2)
-        self.sent = TokAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.GRU,dropout=0.2)
-        self.lin_out_t = nn.Linear(hid_size*2,num_class)
-        self.tokat = nn.Linear(hid_size*2,1)
+        self.word = AttentionalBiRNN(emb_size, hid_size, RNN_cell=nn.GRU)
+        self.sent = TokAttentionalBiRNN(hid_size*2, hid_size, RNN_cell=nn.GRU)
+        self.lin_out_t0 = nn.Linear(hid_size*2,hid_size)
+        self.lin_out_t1 = nn.Linear(hid_size,hid_size)
+        self.lin_out_t = nn.Linear(hid_size,num_class)
+        self.tokat = nn.Linear(hid_size*4,1)
 
     def set_emb_tensor(self,emb_tensor):
         self.emb_size = emb_tensor.size(-1)
@@ -135,19 +149,23 @@ class HAN(nn.Module):
         tok_mask = torch.cat([Variable(tok_mask.data.new().resize_(1).fill_(0)),tok_mask],dim=0)
         
 
-        emb_w = F.dropout(self.embed(batch_reviews),training=self.training)
+        emb_w = F.dropout2d(self.embed(batch_reviews),training=self.training,p=0.05)
+        #print(emb_w)
         packed_sents = torch.nn.utils.rnn.pack_padded_sequence(emb_w, ls,batch_first=True)
         sent_embs = self.word(packed_sents)
         rev_embs = self._reorder_sent(sent_embs,sent_order)
         tok_w = self._reorder_tok(tok_mask,sent_order)
 
+        rev_embs = F.dropout2d(rev_embs,training=self.training,p=0.05)
 
         packed_rev = torch.nn.utils.rnn.pack_padded_sequence(rev_embs, lr,batch_first=True)
         doc_embs,toked_avg = self.sent(packed_rev,tok_w)
 
         #print(torch.sum(tok_w,dim=-1,True))
-        a = F.sigmoid(self.tokat(toked_avg)) * F.sigmoid(torch.sum(tok_w,-1,True)).detach()
-        out_t = self.lin_out_t(a * toked_avg + (1-a) * doc_embs)
+        a = F.sigmoid(self.tokat(torch.cat([doc_embs,toked_avg],dim=-1)))* F.sigmoid(torch.sum(tok_w,-1,True)).detach()
+        out_t = F.dropout(F.relu(self.lin_out_t0(a * toked_avg + (1-a) * doc_embs)),training=self.training)
+        out_t = F.dropout(F.relu(self.lin_out_t1(out_t)),training=self.training)
+        out_t = self.lin_out_t(out_t)
 
         return  out_t
 
